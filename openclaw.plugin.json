@@ -1,0 +1,8 @@
+{
+  "id": "claws-defender",
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {}
+  }
+}

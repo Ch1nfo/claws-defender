@@ -36,13 +36,12 @@ your-openclaw-project/
 ```
 
 安装步骤：
-your-openclaw-project/
 ```bash
-git clone https://github.com/Ch1nfo/claws-defender.git ./extensions/claws-defender
-cd ./extensions/claws-defender
+git clone https://github.com/chinfowang/claws-defender /tmp/claws-defender
+cd /tmp/claws-defender
 npm install
 npm run build
-openclaw plugins install ./extensions/claws-defender
+openclaw plugins install /tmp/claws-defender
 ```
 
 如果你当前就在 `extensions/` 的父目录下，请按你的实际相对路径执行，不要写成重复的 `./extensions/./extensions/...`。
@@ -140,12 +139,11 @@ your-openclaw-project/
 Install steps:
 
 ```bash
-your-openclaw-project/
-git clone https://github.com/Ch1nfo/claws-defender ./extensions/claws-defender
-cd ./extensions/claws-defender
+git clone https://github.com/chinfowang/claws-defender /tmp/claws-defender
+cd /tmp/claws-defender
 npm install
 npm run build
-openclaw plugins install ./extensions/claws-defender
+openclaw plugins install /tmp/claws-defender
 ```
 
 If your shell is already in the parent directory of `extensions/`, use the matching relative path and avoid duplicating `./extensions/./extensions/...`.

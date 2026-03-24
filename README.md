@@ -181,9 +181,6 @@ The audit log is sanitized by default. It keeps necessary metadata and truncated
 - Open a GitHub Issue for bugs, false positives, or installation problems
 - Include your OpenClaw version, plugin version, reproduction steps, and relevant log excerpts
 
-### Maintainer
-
-Maintained by `chinfowang`.
 
 ### License
 

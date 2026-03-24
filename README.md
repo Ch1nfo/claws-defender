@@ -38,7 +38,7 @@ openclaw plugins install /tmp/claws-defender
 
 ### 环境要求
 
-- OpenClaw >= 2026.3.22
+- OpenClaw >= 2026.3.23
 - Node.js 与 npm，可用于本地构建
 
 ### 可用工具
@@ -130,7 +130,7 @@ openclaw plugins install /tmp/claws-defender
 
 ### Requirements
 
-- OpenClaw >= 2026.3.22
+- OpenClaw >= 2026.3.23
 - Node.js and npm for local build
 
 ### Available Tools

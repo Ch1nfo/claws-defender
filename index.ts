@@ -11,8 +11,12 @@
  */
 
 import path from "node:path";
-import type { OpenClawPluginApi } from "openclaw/plugin-sdk/core";
-import { emptyPluginConfigSchema } from "openclaw/plugin-sdk/core";
+import {
+  definePluginEntry,
+  emptyPluginConfigSchema,
+  type OpenClawPluginApi,
+} from "openclaw/plugin-sdk/plugin-entry";
+import { textResult, type AnyAgentTool } from "openclaw/plugin-sdk/agent-runtime";
 import { AuditLog } from "./src/audit/immutable-log.js";
 import { createAfterToolCallHandler } from "./src/hooks/after-tool-call.js";
 import { createBeforeToolCallHandler } from "./src/hooks/before-tool-call.js";
@@ -28,11 +32,22 @@ import type { ScanFinding, ScanReport, ToolCallRecord } from "./src/types.js";
 const recentToolCalls: ToolCallRecord[] = [];
 let lastScanReport: ScanReport | null = null;
 
+function resolveScanRoots(api: OpenClawPluginApi): { projectRoot: string; workspaceDir: string } {
+  const workspaceDir =
+    api.runtime.agent.resolveAgentWorkspaceDir(api.config) || process.cwd() || api.resolvePath(".");
+  return {
+    // The plugin is installed under ~/.openclaw/extensions/<id>, so scans should
+    // target the host workspace/gateway cwd instead of the plugin install dir.
+    projectRoot: process.cwd() || workspaceDir,
+    workspaceDir,
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Plugin definition
 // ---------------------------------------------------------------------------
 
-const clawsDefenderPlugin = {
+const clawsDefenderPlugin = definePluginEntry({
   id: "claws-defender",
   name: "Claws-Defender",
   description: "Agent OS runtime security defender — tool call interception, prompt injection scanning, and dual-mode security scanning",
@@ -65,9 +80,10 @@ const clawsDefenderPlugin = {
       auditLog.logStartup({ port: event.port, timestamp: Date.now() });
 
       try {
+        const { projectRoot, workspaceDir } = resolveScanRoots(api);
         const report = runQuickScan({
-          projectRoot: api.resolvePath("."),
-          workspaceDir: api.resolvePath("."),
+          projectRoot,
+          workspaceDir,
           config: api.config as unknown as Record<string, unknown>,
           baselineDir,
         });
@@ -98,123 +114,126 @@ const clawsDefenderPlugin = {
     // -------------------------------------------------------------------
 
     // guard_quick_scan
-    api.registerTool(
-      () => ({
-        name: "guard_quick_scan",
-        description: "Run a quick security scan (< 10 seconds). Checks plugin integrity, dangerous configs, recent skill code, and memory files.",
-        parameters: {
-          type: "object" as const,
-          properties: {},
-        },
-        async execute() {
-          try {
-            const report = runQuickScan({
-              projectRoot: api.resolvePath("."),
-              workspaceDir: api.resolvePath("."),
-              config: api.config as unknown as Record<string, unknown>,
-              baselineDir,
-            });
+    api.registerTool({
+      name: "guard_quick_scan",
+      description: "Run a quick security scan (< 10 seconds). Checks plugin integrity, dangerous configs, recent skill code, and memory files.",
+      parameters: {
+        type: "object" as const,
+        properties: {},
+      },
+      async execute() {
+        try {
+          const { projectRoot, workspaceDir } = resolveScanRoots(api);
+          const report = runQuickScan({
+            projectRoot,
+            workspaceDir,
+            config: api.config as unknown as Record<string, unknown>,
+            baselineDir,
+          });
 
-            lastScanReport = report;
-            auditLog.logScanReport(report);
+          lastScanReport = report;
+          auditLog.logScanReport(report);
 
-            return formatScanReport(report);
-          } catch (err) {
-            return `Quick scan failed: ${String(err)}`;
-          }
-        },
-      }),
-      { name: "guard_quick_scan" },
-    );
+          return textResult(formatScanReport(report), report);
+        } catch (err) {
+          const message = `Quick scan failed: ${String(err)}`;
+          return textResult(message, { ok: false, error: message });
+        }
+      },
+    } as AnyAgentTool);
 
     // guard_full_scan
-    api.registerTool(
-      () => ({
-        name: "guard_full_scan",
-        description: "Run a comprehensive security scan (1-5 minutes). Includes full skill scan, dependency CVE check, session DLP, credential audit, and behavior analysis.",
-        parameters: {
-          type: "object" as const,
-          properties: {},
-        },
-        async execute() {
-          try {
-            const report = runFullScan({
-              projectRoot: api.resolvePath("."),
-              workspaceDir: api.resolvePath("."),
-              config: api.config as unknown as Record<string, unknown>,
-              baselineDir,
-              openclawHome,
-              recentToolCalls,
-            });
+    api.registerTool({
+      name: "guard_full_scan",
+      description: "Run a comprehensive security scan (1-5 minutes). Includes full skill scan, dependency CVE check, session DLP, credential audit, and behavior analysis.",
+      parameters: {
+        type: "object" as const,
+        properties: {},
+      },
+      async execute() {
+        try {
+          const { projectRoot, workspaceDir } = resolveScanRoots(api);
+          const report = runFullScan({
+            projectRoot,
+            workspaceDir,
+            config: api.config as unknown as Record<string, unknown>,
+            baselineDir,
+            openclawHome,
+            recentToolCalls,
+          });
 
-            lastScanReport = report;
-            auditLog.logScanReport(report);
+          lastScanReport = report;
+          auditLog.logScanReport(report);
 
-            return formatScanReport(report);
-          } catch (err) {
-            return `Full scan failed: ${String(err)}`;
-          }
-        },
-      }),
-      { name: "guard_full_scan" },
-    );
+          return textResult(formatScanReport(report), report);
+        } catch (err) {
+          const message = `Full scan failed: ${String(err)}`;
+          return textResult(message, { ok: false, error: message });
+        }
+      },
+    } as AnyAgentTool);
 
     // guard_status
-    api.registerTool(
-      () => ({
-        name: "guard_status",
-        description: "View the results of the most recent security scan.",
-        parameters: {
-          type: "object" as const,
-          properties: {},
-        },
-        async execute() {
-          if (!lastScanReport) {
-            return "No scan has been run yet. Use guard_quick_scan or guard_full_scan to run a security scan.";
-          }
-          return formatScanReport(lastScanReport);
-        },
-      }),
-      { name: "guard_status" },
-    );
+    api.registerTool({
+      name: "guard_status",
+      description: "View the results of the most recent security scan.",
+      parameters: {
+        type: "object" as const,
+        properties: {},
+      },
+      async execute() {
+        if (!lastScanReport) {
+          const message =
+            "No scan has been run yet. Use guard_quick_scan or guard_full_scan to run a security scan.";
+          return textResult(message, { ok: false, error: message });
+        }
+        return textResult(formatScanReport(lastScanReport), lastScanReport);
+      },
+    } as AnyAgentTool);
 
     // guard_explain
-    api.registerTool(
-      () => ({
-        name: "guard_explain",
-        description: "Get a detailed explanation of a specific security finding by its ID.",
-        parameters: {
-          type: "object" as const,
-          properties: {
-            finding_id: {
-              type: "string" as const,
-              description: "The ID of the finding to explain",
-            },
+    api.registerTool({
+      name: "guard_explain",
+      description: "Get a detailed explanation of a specific security finding by its ID.",
+      parameters: {
+        type: "object" as const,
+        properties: {
+          finding_id: {
+            type: "string" as const,
+            description: "The ID of the finding to explain",
           },
-          required: ["finding_id"],
         },
-        async execute(params: Record<string, unknown>) {
-          const findingId = typeof params.finding_id === "string" ? params.finding_id : "";
-          if (!findingId) return "Please provide a finding_id.";
+        required: ["finding_id"],
+      },
+      async execute(_toolCallId, params: Record<string, unknown>) {
+        const findingId = typeof params.finding_id === "string" ? params.finding_id : "";
+        if (!findingId) {
+          const message = "Please provide a finding_id.";
+          return textResult(message, { ok: false, error: message });
+        }
 
-          if (!lastScanReport) {
-            return "No scan has been run yet. Run guard_quick_scan first.";
-          }
+        if (!lastScanReport) {
+          const message = "No scan has been run yet. Run guard_quick_scan first.";
+          return textResult(message, { ok: false, error: message });
+        }
 
-          const finding = findFindingById(lastScanReport, findingId);
-          if (!finding) {
-            return `Finding "${findingId}" not found. Available finding IDs:\n${listFindingIds(lastScanReport)}`;
-          }
+        const finding = findFindingById(lastScanReport, findingId);
+        if (!finding) {
+          const message = `Finding "${findingId}" not found. Available finding IDs:\n${listFindingIds(lastScanReport)}`;
+          return textResult(message, {
+            ok: false,
+            error: message,
+            availableFindingIds: listFindingIds(lastScanReport),
+          });
+        }
 
-          return formatFindingDetail(finding);
-        },
-      }),
-      { name: "guard_explain" },
-    );
+        return textResult(formatFindingDetail(finding), finding);
+      },
+    } as AnyAgentTool);
 
     api.logger.info?.("[claws-defender] Security defender registered successfully.");
   },
-};
+});
 
 // ---------------------------------------------------------------------------
 // Report formatting helpers

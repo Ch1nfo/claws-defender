@@ -5,8 +5,12 @@
  * but logs detected injection attempts for audit and alerting.
  */
 
-import type { PluginHookMessageReceivedEvent, PluginHookMessageContext } from "openclaw/plugin-sdk/core";
 import type { AuditLog } from "../audit/immutable-log.js";
+import type {
+  DefenderLogger,
+  DefenderMessageContext,
+  DefenderMessageReceivedEvent,
+} from "../types.js";
 
 // ---------------------------------------------------------------------------
 // Prompt injection detection rules
@@ -95,13 +99,13 @@ const MESSAGE_INJECTION_PATTERNS: InjectionPattern[] = [
 
 export type OnMessageHandlerDeps = {
   auditLog: AuditLog;
-  logger: { warn: (msg: string) => void };
+  logger: DefenderLogger;
 };
 
 export function createOnMessageHandler(deps: OnMessageHandlerDeps) {
   return async (
-    event: PluginHookMessageReceivedEvent,
-    ctx: PluginHookMessageContext,
+    event: DefenderMessageReceivedEvent,
+    ctx: DefenderMessageContext,
   ): Promise<void> => {
     const { content, from } = event;
     if (!content || content.length < 10) return; // Skip very short messages

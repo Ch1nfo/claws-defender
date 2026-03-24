@@ -5,8 +5,7 @@
  * handler for sequence-based anomaly detection (e.g., file read → network egress).
  */
 
-import type { PluginHookAfterToolCallEvent, PluginHookToolContext } from "openclaw/plugin-sdk/core";
-import type { ToolCallRecord } from "../types.js";
+import type { DefenderAfterToolCallEvent, DefenderToolContext, ToolCallRecord } from "../types.js";
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -25,8 +24,8 @@ export type AfterToolCallHandlerDeps = {
 
 export function createAfterToolCallHandler(deps: AfterToolCallHandlerDeps) {
   return async (
-    event: PluginHookAfterToolCallEvent,
-    ctx: PluginHookToolContext,
+    event: DefenderAfterToolCallEvent,
+    ctx: DefenderToolContext,
   ): Promise<void> => {
     const { recentToolCalls } = deps;
 

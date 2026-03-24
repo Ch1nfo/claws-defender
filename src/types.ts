@@ -40,6 +40,55 @@ export type ScanReport = {
 
 export type AlertLevel = "critical" | "warn" | "info";
 
+export type DefenderLogger = {
+  info?: (msg: string) => void;
+  warn: (msg: string) => void;
+  error: (msg: string) => void;
+};
+
+export type DefenderToolContext = {
+  sessionKey?: string;
+  runId?: string;
+  toolName?: string;
+  toolCallId?: string;
+};
+
+export type DefenderBeforeToolCallEvent = {
+  toolName: string;
+  params: Record<string, unknown>;
+  runId?: string;
+  toolCallId?: string;
+};
+
+export type DefenderBeforeToolCallResult = {
+  params?: Record<string, unknown>;
+  block?: boolean;
+  blockReason?: string;
+};
+
+export type DefenderAfterToolCallEvent = {
+  toolName: string;
+  params: Record<string, unknown>;
+  result?: unknown;
+  error?: string;
+  runId?: string;
+  toolCallId?: string;
+  durationMs?: number;
+};
+
+export type DefenderMessageReceivedEvent = {
+  content: string;
+  from: string;
+  timestamp?: number;
+  metadata?: Record<string, unknown>;
+};
+
+export type DefenderMessageContext = {
+  channelId: string;
+  accountId?: string;
+  conversationId?: string;
+};
+
 export type GuardAlert = {
   timestamp: number;
   level: AlertLevel;

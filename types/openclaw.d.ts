@@ -1,8 +1,8 @@
-// Type stubs for openclaw/plugin-sdk/core
+// Type stubs for standalone claws-defender builds.
 // These are provided at runtime by the OpenClaw host environment.
 // This file exists only to allow standalone TypeScript compilation.
 
-declare module "openclaw/plugin-sdk/core" {
+declare module "openclaw/plugin-sdk/plugin-entry" {
   export interface OpenClawPluginApi {
     logger: {
       info?: (msg: string) => void;
@@ -10,57 +10,79 @@ declare module "openclaw/plugin-sdk/core" {
       error: (msg: string) => void;
     };
     config: unknown;
-    on(event: "before_tool_call", handler: (event: PluginHookBeforeToolCallEvent, ctx: PluginHookToolContext) => Promise<PluginHookBeforeToolCallResult | void>, options?: { priority?: number }): void;
-    on(event: "after_tool_call", handler: (event: PluginHookAfterToolCallEvent, ctx: PluginHookToolContext) => Promise<void>): void;
-    on(event: "message_received", handler: (event: PluginHookMessageReceivedEvent, ctx: PluginHookMessageContext) => Promise<void>): void;
+    pluginConfig?: Record<string, unknown>;
+    runtime: {
+      agent: {
+        resolveAgentWorkspaceDir(config: unknown): string | undefined;
+      };
+    };
+    on(event: "before_tool_call", handler: (event: {
+      toolName: string;
+      params: Record<string, unknown>;
+      runId?: string;
+      toolCallId?: string;
+    }, ctx: {
+      sessionKey?: string;
+      runId?: string;
+      toolName?: string;
+      toolCallId?: string;
+    }) => Promise<{ params?: Record<string, unknown>; block?: boolean; blockReason?: string } | void>, options?: { priority?: number }): void;
+    on(event: "after_tool_call", handler: (event: {
+      toolName: string;
+      params: Record<string, unknown>;
+      result?: unknown;
+      error?: string;
+      runId?: string;
+      toolCallId?: string;
+      durationMs?: number;
+    }, ctx: {
+      sessionKey?: string;
+      runId?: string;
+      toolName?: string;
+      toolCallId?: string;
+    }) => Promise<void>): void;
+    on(event: "message_received", handler: (event: {
+      content: string;
+      from: string;
+      timestamp?: number;
+      metadata?: Record<string, unknown>;
+    }, ctx: {
+      channelId: string;
+      accountId?: string;
+      conversationId?: string;
+    }) => Promise<void>): void;
     on(event: "gateway_start", handler: (event: { port: number }) => Promise<void>): void;
-    registerTool(factory: () => ToolDefinition, meta: { name: string }): void;
+    registerTool(tool: import("openclaw/plugin-sdk/agent-runtime").AnyAgentTool): void;
     resolvePath(relativePath: string): string;
   }
 
-  export interface PluginHookBeforeToolCallEvent {
-    toolName: string;
-    params: Record<string, unknown>;
-  }
-
-  export interface PluginHookBeforeToolCallResult {
-    block: boolean;
-    blockReason?: string;
-  }
-
-  export interface PluginHookAfterToolCallEvent {
-    toolName: string;
-    params: Record<string, unknown>;
-    result?: unknown;
-    error?: string;
-    runId?: string;
-    durationMs?: number;
-  }
-
-  export interface PluginHookToolContext {
-    sessionKey: string;
-    runId?: string;
-  }
-
-  export interface PluginHookMessageReceivedEvent {
-    content: string;
-    from: string;
-  }
-
-  export interface PluginHookMessageContext {
-    channelId: string;
-  }
-
-  export interface ToolDefinition {
+  export function definePluginEntry(definition: {
+    id: string;
     name: string;
+    description: string;
+    configSchema?: unknown;
+    register(api: OpenClawPluginApi): void;
+  }): unknown;
+  export function emptyPluginConfigSchema(): unknown;
+}
+
+declare module "openclaw/plugin-sdk/agent-runtime" {
+  export type AnyAgentTool = {
+    name: string;
+    label?: string;
     description: string;
     parameters: {
       type: "object";
       properties: Record<string, unknown>;
       required?: string[];
     };
-    execute(params: Record<string, unknown>): Promise<string>;
-  }
+    execute(
+      toolCallId: string,
+      params: Record<string, unknown>,
+      signal?: AbortSignal,
+      onUpdate?: unknown,
+    ): Promise<unknown>;
+  };
 
-  export function emptyPluginConfigSchema(): unknown;
+  export function textResult<TDetails>(text: string, details: TDetails): unknown;
 }

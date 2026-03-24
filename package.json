@@ -1,4 +1,6 @@
 {
+  "name": "claws-defender",
+  "version": "2026.3.24",
   "description": "OpenClaw runtime security defender — tool call interception, prompt injection scanning, and dual-mode security scanning",
   "type": "module",
   "main": "./dist/index.js",
@@ -13,7 +15,7 @@
     "typescript": "^5.4.5"
   },
   "peerDependencies": {
-    "openclaw": ">=2026.3.11"
+    "openclaw": ">=2026.3.22"
   },
   "openclaw": {
     "extensions": [

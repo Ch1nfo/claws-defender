@@ -7,10 +7,14 @@
  * - Tool call sequence anomaly detection
  */
 
-import type { PluginHookBeforeToolCallEvent, PluginHookBeforeToolCallResult, PluginHookToolContext } from "openclaw/plugin-sdk/core";
 import type { AuditLog } from "../audit/immutable-log.js";
 import { scanContentForInjection } from "../scanners/memory-scanner.js";
-import type { ToolCallRecord, GuardDecision } from "../types.js";
+import type {
+  DefenderBeforeToolCallEvent,
+  DefenderBeforeToolCallResult,
+  DefenderToolContext,
+  ToolCallRecord,
+} from "../types.js";
 
 // ---------------------------------------------------------------------------
 // Risk scoring rules for bash/exec commands
@@ -116,9 +120,9 @@ export type BeforeToolCallHandlerDeps = {
 
 export function createBeforeToolCallHandler(deps: BeforeToolCallHandlerDeps) {
   return async (
-    event: PluginHookBeforeToolCallEvent,
-    ctx: PluginHookToolContext,
-  ): Promise<PluginHookBeforeToolCallResult | void> => {
+    event: DefenderBeforeToolCallEvent,
+    ctx: DefenderToolContext,
+  ): Promise<DefenderBeforeToolCallResult | void> => {
     const { toolName, params } = event;
     const { auditLog, recentToolCalls } = deps;
 

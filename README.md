@@ -36,9 +36,9 @@ your-openclaw-project/
 ```
 
 安装步骤：
-
+your-openclaw-project/
 ```bash
-git clone https://github.com/chinfowang/claws-defender ./extensions/claws-defender
+git clone https://github.com/Ch1nfo/claws-defender.git ./extensions/claws-defender
 cd ./extensions/claws-defender
 npm install
 npm run build
@@ -140,7 +140,8 @@ your-openclaw-project/
 Install steps:
 
 ```bash
-git clone https://github.com/chinfowang/claws-defender ./extensions/claws-defender
+your-openclaw-project/
+git clone https://github.com/Ch1nfo/claws-defender ./extensions/claws-defender
 cd ./extensions/claws-defender
 npm install
 npm run build

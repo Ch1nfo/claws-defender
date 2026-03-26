@@ -1,148 +1,126 @@
 # Claws-Defender
 
-中文 | [English](#english)
+<p align="center">
+  <strong>Runtime guardrails for OpenClaw agents.</strong>
+</p>
 
-OpenClaw 运行时安全插件。它用于拦截危险工具调用、阻断恶意记忆写入、检测提示注入与危险 Shell 载荷、执行安全扫描，并把安全事件记录到本地审计日志。
-已适配openclaw v2026.3.23-1。由于openclaw v2026.3.23-1开始，旧插件体系被直接废弃，请升级到最新版后使用插件。
+**Claws-Defender** is an OpenClaw runtime security plugin.
+It intercepts dangerous tool calls, blocks malicious memory writes, detects prompt injection and hazardous shell payloads, runs security scans, and records security events to a local audit log.
 
-## 中文
+If your OpenClaw agent can access files, shell commands, network egress, or persistent memory, this plugin adds a practical runtime defense layer around those surfaces.
 
-### 简介
+[中文](./README_ZH.md) | English
 
-Claws-Defender 是一个独立维护的 OpenClaw 运行时安全插件仓库，推荐通过 GitHub 仓库源码构建后再从本地目录安装。
+## Why This Exists
 
-它提供这些能力：
+OpenClaw is powerful because the agent can act.
+That also means prompt injection, persistence through memory files, risky shell execution, and data exfiltration attempts all become real operational concerns.
 
-- 工具调用拦截：在执行前识别反弹 shell、可疑外传、凭据读取等高风险命令
-- 记忆写入防护：在写入 `MEMORY.md` 或 `memory/*.md` 前拦截提示注入和危险 Shell 命令
-- 提示注入检测：扫描收到的消息以及工作区记忆文件中的持久化注入内容
-- 双模式安全扫描：支持快速扫描和完整扫描
-- 行为基线记录：分析近期工具调用中的异常模式
-- 本地审计日志：将安全事件写入 `~/.openclaw/claws-defender/`
+Claws-Defender focuses on those runtime risks:
 
-### 核心功能
+- high-risk command interception before execution
+- prompt-injection detection on inbound content and persisted memory
+- blocking dangerous writes to `MEMORY.md` and `memory/*.md`
+- quick and full workspace security scans
+- append-only local audit logging for alerts, scan results, and blocked actions
 
-如果你在 OpenClaw 中运行带文件系统、Shell 或网络能力的 agent，这个插件可以提供一层额外的运行时防护，帮助你更早发现危险配置、可疑技能代码、持久化提示注入，以及潜在数据泄露行为。
+## Highlights
 
-### 安装方式
+- **Before-tool-call guardrail**: blocks reverse shells, dangerous exfiltration patterns, sensitive file reads, and other suspicious command executions
+- **Memory write protection**: scans content before it lands in `MEMORY.md` or `memory/*.md`
+- **Cross-line shell payload detection**: catches split payloads such as `curl ... \n| sh` and multi-line reverse shell fragments
+- **Workspace scanning**: supports quick scan and full scan flows for config, memory, credentials, sessions, and skill code
+- **Local audit trail**: writes alerts and block decisions to a local JSONL audit log with secret redaction
 
-这是一个本地安装插件。请把仓库放到任意目录下（如/tmp/claws-defender），再从本地路径安装。
-
-安装步骤：
-```bash
-git clone https://github.com/Ch1nfo/claws-defender /tmp/claws-defender
-cd /tmp/claws-defender
-npm install
-npm run build
-openclaw plugins install /tmp/claws-defender
-```
-
-### 环境要求
-
-- OpenClaw >= 2026.3.23
-- Node.js 与 npm，可用于本地构建
-
-### 可用工具
-
-- `guard_quick_scan`: 快速安全扫描
-- `guard_full_scan`: 完整安全扫描
-- `guard_status`: 查看最近一次扫描结果
-- `guard_explain`: 按 finding ID 查看详细解释
-
-示例提示词：
+## What It Protects
 
 ```text
-运行一次安全扫描
-做一次完整安全审计
-现在有哪些安全问题？
-解释一下 finding cfg-gateway-auth-mode
+Inbound message / tool output / generated content
+                    │
+                    ▼
+         ┌──────────────────────┐
+         │   Claws-Defender     │
+         │  runtime guardrails  │
+         └──────────┬───────────┘
+                    │
+     ┌──────────────┼──────────────┐
+     ▼              ▼              ▼
+ before_tool   memory writes    security scans
+ interception  MEMORY.md        workspace checks
+                memory/*.md
 ```
 
-### 扫描功能
+## Core Capabilities
 
-快速扫描：
+### 1. Tool Call Interception
 
-- 插件入口完整性基线
-- 危险配置项检查
-- 最近修改的技能代码扫描
-- `MEMORY.md` 和 `memory/*.md` 的提示注入与危险命令检查
+The plugin hooks into `before_tool_call` and evaluates risky commands before execution.
 
-完整扫描：
+Current protections include:
 
-- 所有技能代码深度扫描
-- 依赖漏洞检查
-- Session 历史中的敏感信息扫描
-- `~/.openclaw/credentials` 权限检查
-- 近期工具调用行为分析
+- reverse shells such as `/dev/tcp`, `nc -e`, `bash -i >&`
+- remote download-and-execute patterns such as `curl | sh` and `wget | bash`
+- destructive or persistence-oriented commands such as `crontab`, SUID changes, and `rm -rf /`
+- sensitive local reads such as `/etc/shadow`, `~/.ssh`, `~/.aws`, and OpenClaw credential paths
+- suspicious multi-step behavior patterns such as file read followed by network egress
 
-### 审计日志
+### 2. Memory Write Protection
 
-日志文件位于：
+The plugin protects persistent memory because memory poisoning is one of the easiest ways to turn a one-time injection into a durable compromise.
+
+Before content is written to:
+
+- `MEMORY.md`
+- `memory/*.md`
+
+it is scanned for:
+
+- prompt injection directives
+- system prompt spoofing
+- role reassignment instructions
+- hidden or persistent behavior directives
+- dangerous shell payloads, including cross-line command fragments
+
+Dangerous shell payloads in memory writes are blocked before they persist.
+
+### 3. Security Scanning
+
+Two scan modes are available:
+
+- `guard_quick_scan`: fast checks intended for routine use
+- `guard_full_scan`: broader inspection across the workspace and recent runtime history
+
+Quick scan coverage:
+
+- plugin entry integrity baseline
+- dangerous configuration checks
+- recently modified skill code
+- `MEMORY.md` and `memory/*.md` prompt injection checks
+- dangerous shell payloads in memory files
+
+Full scan coverage:
+
+- deep skill scan
+- dependency audit
+- session history scanning
+- credential and permission checks
+- recent tool-call behavior analysis
+
+### 4. Audit Logging
+
+Security events are written to a local append-only audit log:
 
 ```text
 ~/.openclaw/claws-defender/claws-defender-audit.jsonl
 ```
 
-日志现在默认做脱敏处理，只保留必要元数据和截断后的内容预览，不会原样持久化完整消息正文或明显的敏感字段。
+The log is sanitized by default:
 
-### 当前防护重点
+- obvious secrets are redacted
+- long strings are truncated
+- only necessary metadata and previews are stored
 
-- 在 `before_tool_call` 阶段拦截高风险 shell/exec 命令
-- 在写入记忆文件前阻断反弹 Shell、curl/wget pipe shell、持久化、提权、敏感文件读取等危险命令
-- 扫描 `MEMORY.md` 和 `memory/*.md`，识别提示注入文本和跨行拆分的危险 Shell 片段
-- 将拦截、告警、扫描结果写入本地 JSONL 审计日志
-
-### 获取帮助
-
-- 用 GitHub Issues 提交问题或误报
-- 在 issue 中附上 OpenClaw 版本、插件版本、复现步骤和相关日志片段
-
-
-### 许可证
-
-MIT，见 [LICENSE](./LICENSE)。
-
----
-
-## English
-
-### What This Is
-
-Claws-Defender is a standalone OpenClaw runtime security plugin repository. The recommended install flow is to clone the GitHub repo, build it locally, and install it from that directory.
-
-It provides:
-
-- Tool call interception for high-risk shell and file operations
-- Memory write protection for `MEMORY.md` and `memory/*.md`
-- Prompt injection detection for inbound messages and persisted memory content
-- Dual-mode security scans: quick scan and full scan
-- Behavioral baseline tracking for recent tool usage
-- Local audit logging under `~/.openclaw/claws-defender/`
-
-### Why It Is Useful
-
-If your OpenClaw agents can access the filesystem, shell tools, or network tools, this plugin adds a practical runtime guard layer to catch dangerous configs, suspicious skill code, persistent prompt injection, and possible exfiltration behavior earlier.
-
-### Installation
-
-This plugin is installed locally from source. Place the repository under any directory (e.g. /tmp/claws-defender), build it there, and install it from the local path.
-
-Install steps:
-
-```bash
-git clone https://github.com/Ch1nfo/claws-defender /tmp/claws-defender
-cd /tmp/claws-defender
-npm install
-npm run build
-openclaw plugins install /tmp/claws-defender
-```
-
-### Requirements
-
-- OpenClaw >= 2026.3.23
-- Node.js and npm for local build
-
-### Available Tools
+## Available Agent Tools
 
 - `guard_quick_scan`: run a quick security scan
 - `guard_full_scan`: run a full security scan
@@ -154,51 +132,33 @@ Example prompts:
 ```text
 Run a security scan
 Do a full security audit
-Are there any security issues right now?
-Explain finding cfg-gateway-auth-mode
+What did the latest scan find?
+Explain finding mem-cmd-reverse-shell:MEMORY.md:12
 ```
 
-### Scan Coverage
+## Installation
 
-Quick scan:
+This plugin is installed locally from source.
 
-- plugin entry integrity baseline
-- dangerous configuration checks
-- recently modified skill code scan
-- prompt injection and dangerous command checks across `MEMORY.md` and `memory/*.md`
-
-Full scan:
-
-- deep scan across all skill code
-- dependency vulnerability audit
-- sensitive data scan in session history
-- permission audit for `~/.openclaw/credentials`
-- recent tool-call behavior analysis
-
-### Audit Log
-
-Audit events are written to:
-
-```text
-~/.openclaw/claws-defender/claws-defender-audit.jsonl
+```bash
+git clone https://github.com/Ch1nfo/claws-defender /tmp/claws-defender
+cd /tmp/claws-defender
+npm install
+npm run build
+openclaw plugins install /tmp/claws-defender
 ```
 
-The audit log is sanitized by default. It keeps necessary metadata and truncated previews instead of persisting full message bodies or obvious sensitive fields verbatim.
+## Requirements
 
-### Current Protection Focus
+- OpenClaw plugin runtime with the current extension system
+- Node.js and npm for local build
+- OpenClaw >= `2026.3.23-1`
 
-- intercept high-risk shell and exec commands in `before_tool_call`
-- block malicious writes to memory files before they persist
-- detect reverse shells, curl/wget pipe-shell payloads, persistence commands, privilege-escalation commands, and sensitive file reads in memory content
-- scan both `MEMORY.md` and `memory/*.md`, including cross-line command fragments
-- record alerts, blocks, and scan reports to a local JSONL audit log
+## Project Scope
 
-### Support
+Claws-Defender is not a full sandbox and not a replacement for OpenClaw's own security model.
+It is a runtime-focused guard layer designed to catch obvious dangerous behavior early, reduce persistence risk, and improve visibility through scanning and audit logs.
 
-- Open a GitHub Issue for bugs, false positives, or installation problems
-- Include your OpenClaw version, plugin version, reproduction steps, and relevant log excerpts
-
-
-### License
+## License
 
 MIT. See [LICENSE](./LICENSE).

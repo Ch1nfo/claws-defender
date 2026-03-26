@@ -8,7 +8,8 @@
  */
 
 import type { AuditLog } from "../audit/immutable-log.js";
-import { scanContentForInjection } from "../scanners/memory-scanner.js";
+import { evaluateCommandRules } from "../security/command-rules.js";
+import { analyzeMemoryWrite } from "../scanners/memory-scanner.js";
 import type {
   DefenderBeforeToolCallEvent,
   DefenderBeforeToolCallResult,
@@ -20,62 +21,12 @@ import type {
 // Risk scoring rules for bash/exec commands
 // ---------------------------------------------------------------------------
 
-type CommandRule = {
-  pattern: RegExp;
-  score: number;
-  label: string;
-};
-
-const COMMAND_RISK_RULES: CommandRule[] = [
-  // Critical: reverse shell patterns
-  { pattern: /\/dev\/tcp\//, score: 100, label: "reverse-shell-dev-tcp" },
-  { pattern: /nc\s+-[elp]|ncat\s+-/, score: 100, label: "netcat-listener" },
-  { pattern: /bash\s+-i\s+>&/, score: 100, label: "bash-interactive-redirect" },
-  { pattern: /mkfifo.*nc\s/, score: 100, label: "mkfifo-netcat" },
-
-  // Critical: remote code execution
-  { pattern: /curl\s+[^|]*\|\s*(sh|bash|zsh|python|perl|ruby)/, score: 95, label: "curl-pipe-shell" },
-  { pattern: /wget\s+[^|]*\|\s*(sh|bash|zsh)/, score: 95, label: "wget-pipe-shell" },
-
-  // High: data exfiltration
-  { pattern: /curl\s+.*--data.*(@\/etc\/|@~\/|@\/home)/, score: 80, label: "curl-exfil-file" },
-  { pattern: /curl\s+.*-F\s+.*@/, score: 70, label: "curl-upload-file" },
-  { pattern: /tar\s+.*\|\s*curl/, score: 80, label: "tar-pipe-curl" },
-
-  // High: credential access
-  { pattern: /cat\s+(\/etc\/shadow|\/etc\/passwd|~\/.ssh\/|~\/.aws\/|~\/.openclaw\/credentials)/, score: 85, label: "read-sensitive-file" },
-  { pattern: /\.ssh\/authorized_keys/, score: 80, label: "ssh-key-injection" },
-
-  // High: privilege escalation
-  { pattern: /chmod\s+u\+s|chmod\s+[4267][0-7]{2}/, score: 75, label: "suid-setgid" },
-  { pattern: /crontab\s+-|\/etc\/cron/, score: 70, label: "cron-persistence" },
-
-  // Medium: suspicious operations
-  { pattern: /rm\s+-rf\s+\//, score: 60, label: "destructive-rm-root" },
-  { pattern: /rm\s+-rf\s+~\//, score: 50, label: "destructive-rm-home" },
-  { pattern: /eval\s+\$/, score: 55, label: "shell-eval-variable" },
-  { pattern: /base64\s+(-d|--decode)\s*\|/, score: 60, label: "base64-decode-pipe" },
-
-  // Low-medium: environment harvesting
-  { pattern: /env\s*\|\s*curl|printenv\s*\|\s*curl/, score: 65, label: "env-harvest-curl" },
-  { pattern: /process\.env[\s\S]*fetch/, score: 60, label: "env-harvest-fetch" },
-];
-
 const RISK_THRESHOLD_BLOCK = 80;
 const RISK_THRESHOLD_WARN = 50;
 
 export function evaluateCommandRisk(command: string): { score: number; matchedRules: string[] } {
-  let maxScore = 0;
-  const matchedRules: string[] = [];
-
-  for (const rule of COMMAND_RISK_RULES) {
-    if (rule.pattern.test(command)) {
-      maxScore = Math.max(maxScore, rule.score);
-      matchedRules.push(rule.label);
-    }
-  }
-
-  return { score: maxScore, matchedRules };
+  const risk = evaluateCommandRules(command, "execution");
+  return { score: risk.score, matchedRules: risk.matchedRules.map((rule) => rule.label) };
 }
 
 // ---------------------------------------------------------------------------
@@ -159,27 +110,40 @@ export function createBeforeToolCallHandler(deps: BeforeToolCallHandlerDeps) {
 
     // Rule 2: Memory file write protection
     if (toolName === "file_write" || toolName === "write_file") {
-      const filePath = typeof params.path === "string" ? params.path : (typeof params.file_path === "string" ? params.file_path : "");
+      const filePath =
+        typeof params.path === "string"
+          ? params.path
+          : (typeof params.file_path === "string" ? params.file_path : "");
       if (isMemoryPath(filePath)) {
         const content = typeof params.content === "string" ? params.content : "";
         if (content.length > 0) {
-          const injectionFindings = scanContentForInjection(content);
+          const scanResult = analyzeMemoryWrite(content);
+          const injectionFindings = scanResult.findings;
           if (injectionFindings.length > 0) {
             const criticalCount = injectionFindings.filter((f) => f.severity === "critical").length;
+            const shellCount = injectionFindings.filter((f) =>
+              f.id.startsWith("mem-cmd-")
+            ).length;
             auditLog.logAlert({
               timestamp: Date.now(),
               level: criticalCount > 0 ? "critical" : "warn",
               source: "before-tool-call",
               toolName,
               sessionKey: ctx.sessionKey,
-              message: `Prompt injection patterns detected in memory write (${injectionFindings.length} findings, ${criticalCount} critical)`,
+              message: `Suspicious memory write detected (${injectionFindings.length} findings, ${criticalCount} critical, ${shellCount} shell command matches)`,
               details: {
                 filePath,
                 findings: injectionFindings.map((f) => f.title),
               },
             });
 
-            // Block if critical injection patterns are found
+            if (scanResult.shouldBlockWrite) {
+              const reason = `Memory write blocked: dangerous shell command detected in memory content`;
+              auditLog.logToolBlock({ toolName, reason, params, sessionKey: ctx.sessionKey });
+              return { block: true, blockReason: reason };
+            }
+
+            // Block if critical prompt injection patterns are found
             if (criticalCount > 0) {
               const reason = `Memory write blocked: ${criticalCount} critical prompt injection patterns detected`;
               auditLog.logToolBlock({ toolName, reason, params, sessionKey: ctx.sessionKey });

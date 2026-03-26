@@ -8,6 +8,11 @@
 
 import fs from "node:fs";
 import path from "node:path";
+import {
+  evaluateCommandRules,
+  getCommandRulesForTarget,
+  type CommandRule,
+} from "../security/command-rules.js";
 import type { ScanFinding, ScanResult } from "../types.js";
 
 // ---------------------------------------------------------------------------
@@ -109,13 +114,115 @@ const INJECTION_RULES: InjectionRule[] = [
   },
 ];
 
+const MEMORY_COMMAND_RULES = getCommandRulesForTarget("memory");
+
 // ---------------------------------------------------------------------------
 // Scanner logic
 // ---------------------------------------------------------------------------
 
-function scanMemoryFile(filePath: string): ScanFinding[] {
+function findLineNumber(content: string, index: number): number {
+  let line = 1;
+  for (let i = 0; i < index; i++) {
+    if (content.charCodeAt(i) === 10) line++;
+  }
+  return line;
+}
+
+function toGlobalRegExp(pattern: RegExp): RegExp {
+  const flags = pattern.flags.includes("g") ? pattern.flags : `${pattern.flags}g`;
+  return new RegExp(pattern.source, flags);
+}
+
+function collectRuleMatches<T extends { pattern: RegExp }>(
+  content: string,
+  rules: T[],
+): Array<{ rule: T; line: number }> {
+  const matches: Array<{ rule: T; line: number }> = [];
+
+  for (const rule of rules) {
+    const regex = toGlobalRegExp(rule.pattern);
+    let match: RegExpExecArray | null;
+
+    while ((match = regex.exec(content)) !== null) {
+      matches.push({ rule, line: findLineNumber(content, match.index) });
+
+      if (match[0].length === 0) {
+        regex.lastIndex += 1;
+      }
+    }
+  }
+
+  return matches;
+}
+
+function buildInjectionFinding(
+  rule: InjectionRule,
+  sourceId: string,
+  line: number,
+  filePath?: string,
+): ScanFinding {
+  return {
+    id: `${rule.id}:${sourceId}:${line}`,
+    scanner: "memory-scanner",
+    severity: rule.severity,
+    title: rule.title,
+    description: filePath
+      ? `${rule.description} Found in ${path.basename(filePath)} line ${line}.`
+      : `${rule.description} Found at line ${line} of content being written.`,
+    file: filePath,
+    line,
+    recommendation: filePath
+      ? "Review and sanitize memory file content. Remove any directive or instruction-like text that was not intentionally written by the operator."
+      : "Content being written to memory contains suspicious directive patterns. Review before allowing.",
+  };
+}
+
+function buildCommandFinding(
+  rule: CommandRule,
+  sourceId: string,
+  line: number,
+  filePath?: string,
+): ScanFinding {
+  return {
+    id: `${rule.id}:${sourceId}:${line}`,
+    scanner: "memory-scanner",
+    severity: rule.severity,
+    title: filePath ? `${rule.title} in memory` : rule.title,
+    description: filePath
+      ? `${rule.description} Found in ${path.basename(filePath)} line ${line}.`
+      : `${rule.description} Found at line ${line} of content being written to memory.`,
+    file: filePath,
+    line,
+    recommendation: filePath
+      ? "Remove this shell command from memory immediately. Memory files should not contain executable commands, only plain text notes."
+      : "Content being written to memory contains a dangerous shell command. This write should be blocked immediately.",
+  };
+}
+
+export type MemoryContentScanResult = {
+  findings: ScanFinding[];
+  shouldBlockWrite: boolean;
+};
+
+function scanMemoryContent(content: string, sourceId: string, filePath?: string): MemoryContentScanResult {
   const findings: ScanFinding[] = [];
 
+  for (const match of collectRuleMatches(content, INJECTION_RULES)) {
+    findings.push(buildInjectionFinding(match.rule, sourceId, match.line, filePath));
+  }
+
+  const commandMatches = collectRuleMatches(content, MEMORY_COMMAND_RULES);
+  for (const match of commandMatches) {
+    findings.push(buildCommandFinding(match.rule, sourceId, match.line, filePath));
+  }
+
+  return {
+    findings,
+    shouldBlockWrite: commandMatches.some((match) => match.rule.action === "block"),
+  };
+}
+
+function scanMemoryFile(filePath: string): ScanFinding[] {
   let content: string;
   try {
     content = fs.readFileSync(filePath, "utf-8");
@@ -124,29 +231,7 @@ function scanMemoryFile(filePath: string): ScanFinding[] {
   }
 
   if (content.length === 0) return [];
-
-  const lines = content.split("\n");
-
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i]!;
-    for (const rule of INJECTION_RULES) {
-      if (rule.pattern.test(line)) {
-        findings.push({
-          id: `${rule.id}:${path.basename(filePath)}:${i + 1}`,
-          scanner: "memory-scanner",
-          severity: rule.severity,
-          title: rule.title,
-          description: `${rule.description} Found in ${path.basename(filePath)} line ${i + 1}.`,
-          file: filePath,
-          line: i + 1,
-          recommendation:
-            "Review and sanitize memory file content. Remove any directive or instruction-like text that was not intentionally written by the operator.",
-        });
-      }
-    }
-  }
-
-  return findings;
+  return scanMemoryContent(content, path.basename(filePath), filePath).findings;
 }
 
 // ---------------------------------------------------------------------------
@@ -198,26 +283,14 @@ export function scanMemory(options: MemoryScanOptions): ScanResult {
  * without reading from disk. Used by the before-tool-call hook.
  */
 export function scanContentForInjection(content: string): ScanFinding[] {
-  const findings: ScanFinding[] = [];
-  const lines = content.split("\n");
+  return scanMemoryContent(content, "inline").findings;
+}
 
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i]!;
-    for (const rule of INJECTION_RULES) {
-      if (rule.pattern.test(line)) {
-        findings.push({
-          id: `${rule.id}:inline:${i + 1}`,
-          scanner: "memory-scanner",
-          severity: rule.severity,
-          title: rule.title,
-          description: `${rule.description} Found at line ${i + 1} of content being written.`,
-          line: i + 1,
-          recommendation:
-            "Content being written to memory contains suspicious directive patterns. Review before allowing.",
-        });
-      }
-    }
-  }
+export function analyzeMemoryWrite(content: string): MemoryContentScanResult {
+  return scanMemoryContent(content, "inline");
+}
 
-  return findings;
+export function evaluateMemoryCommandRisk(content: string): { score: number; matchedRuleIds: string[] } {
+  const risk = evaluateCommandRules(content, "memory");
+  return { score: risk.score, matchedRuleIds: risk.matchedRules.map((rule) => rule.id) };
 }

@@ -21,6 +21,7 @@ import { AuditLog } from "./src/audit/immutable-log.js";
 import { createAfterToolCallHandler } from "./src/hooks/after-tool-call.js";
 import { createBeforeToolCallHandler } from "./src/hooks/before-tool-call.js";
 import { createOnMessageHandler } from "./src/hooks/on-message.js";
+import { createMemorySemanticAnalyzer } from "./src/llm/memory-semantic-analyzer.js";
 import { runFullScan } from "./src/scan/full-scan.js";
 import { runQuickScan } from "./src/scan/quick-scan.js";
 import type { ScanFinding, ScanReport, ToolCallRecord } from "./src/types.js";
@@ -32,9 +33,12 @@ import type { ScanFinding, ScanReport, ToolCallRecord } from "./src/types.js";
 const recentToolCalls: ToolCallRecord[] = [];
 let lastScanReport: ScanReport | null = null;
 
+function resolveWorkspaceDir(api: OpenClawPluginApi): string {
+  return api.config?.agents?.defaults?.workspace?.trim() || process.cwd() || api.resolvePath(".");
+}
+
 function resolveScanRoots(api: OpenClawPluginApi): { projectRoot: string; workspaceDir: string } {
-  const workspaceDir =
-    api.runtime.agent.resolveAgentWorkspaceDir(api.config) || process.cwd() || api.resolvePath(".");
+  const workspaceDir = resolveWorkspaceDir(api);
   return {
     // The plugin is installed under ~/.openclaw/extensions/<id>, so scans should
     // target the host workspace/gateway cwd instead of the plugin install dir.
@@ -57,13 +61,25 @@ const clawsDefenderPlugin = definePluginEntry({
     const openclawHome = path.join(process.env.HOME ?? "~", ".openclaw");
     const baselineDir = path.join(openclawHome, "claws-defender");
     const auditLog = new AuditLog(baselineDir);
+    const semanticAnalyzer = createMemorySemanticAnalyzer({
+      runEmbeddedPiAgent: api.runtime.agent.runEmbeddedPiAgent,
+      resolveAgentTimeoutMs: api.runtime.agent.resolveAgentTimeoutMs,
+      config: api.config,
+      logger: api.logger,
+    });
 
     // -------------------------------------------------------------------
     // Register hooks
     // -------------------------------------------------------------------
 
     // 1. before_tool_call — semantic firewall (high priority to run first)
-    const beforeToolCallHandler = createBeforeToolCallHandler({ auditLog, recentToolCalls });
+    const beforeToolCallHandler = createBeforeToolCallHandler({
+      auditLog,
+      recentToolCalls,
+      semanticAnalyzer,
+      logger: api.logger,
+      resolveWorkspaceDir: () => resolveWorkspaceDir(api),
+    });
     api.on("before_tool_call", beforeToolCallHandler, { priority: 100 });
 
     // 2. after_tool_call — behavior logging
@@ -153,13 +169,14 @@ const clawsDefenderPlugin = definePluginEntry({
       async execute() {
         try {
           const { projectRoot, workspaceDir } = resolveScanRoots(api);
-          const report = runFullScan({
+          const report = await runFullScan({
             projectRoot,
             workspaceDir,
             config: api.config as unknown as Record<string, unknown>,
             baselineDir,
             openclawHome,
             recentToolCalls,
+            semanticAnalyzer,
           });
 
           lastScanReport = report;

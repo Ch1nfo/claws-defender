@@ -14,6 +14,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { checkIntegrity } from "../baseline/hash-store.js";
+import type { MemorySemanticAnalyzer } from "../llm/memory-semantic-analyzer.js";
 import { scanConfig } from "../scanners/config-scanner.js";
 import { scanCredentials } from "../scanners/cred-scanner.js";
 import { scanDependencies } from "../scanners/dep-scanner.js";
@@ -59,6 +60,83 @@ function collectExtensionEntryFiles(extensionsDir: string): string[] {
   }
 
   return entryFiles;
+}
+
+async function scanMemorySemantically(params: {
+  workspaceDir: string;
+  semanticAnalyzer: MemorySemanticAnalyzer;
+  maxFiles?: number;
+  maxCharsPerFile?: number;
+}): Promise<ScanResult> {
+  const startedAt = Date.now();
+  const findings: ScanResult["findings"] = [];
+  const candidates: string[] = [];
+  const maxFiles = params.maxFiles ?? 20;
+  const maxCharsPerFile = params.maxCharsPerFile ?? 8_000;
+  const memoryMdPath = path.join(params.workspaceDir, "MEMORY.md");
+  if (fs.existsSync(memoryMdPath)) {
+    candidates.push(memoryMdPath);
+  }
+  const memoryDir = path.join(params.workspaceDir, "memory");
+  if (fs.existsSync(memoryDir)) {
+    try {
+      for (const entry of fs.readdirSync(memoryDir)) {
+        if (entry.endsWith(".md")) {
+          candidates.push(path.join(memoryDir, entry));
+        }
+      }
+    } catch {
+      // ignore
+    }
+  }
+
+  for (const filePath of candidates.slice(0, maxFiles)) {
+    let content = "";
+    try {
+      content = fs.readFileSync(filePath, "utf-8");
+    } catch {
+      continue;
+    }
+    const trimmed = content.trim();
+    if (!trimmed) {
+      continue;
+    }
+    const truncated = trimmed.slice(0, maxCharsPerFile);
+    const semantic = await params.semanticAnalyzer.analyze({
+      content: truncated,
+      source: "memory_file_scan",
+      filePath,
+      workspaceDir: params.workspaceDir,
+      ruleFindings: [],
+    });
+    if (!semantic || semantic.risk === "safe") {
+      continue;
+    }
+    findings.push({
+      id: `memory-semantic:${path.basename(filePath)}`,
+      scanner: "memory-semantic-scanner",
+      severity: semantic.risk === "malicious" ? "high" : "medium",
+      title:
+        semantic.risk === "malicious"
+          ? "Semantic memory risk detected"
+          : "Suspicious semantic memory content",
+      description: `${path.basename(filePath)} was classified as ${semantic.risk} (${Math.round(
+        semantic.confidence * 100,
+      )}% confidence). ${semantic.rationale}`,
+      file: filePath,
+      recommendation:
+        semantic.recommendedAction === "block"
+          ? "Review and sanitize this memory content before future agent runs load it."
+          : "Review this memory content for indirect behavioral manipulation or hidden instructions.",
+    });
+  }
+
+  return {
+    scanner: "memory-semantic-scanner",
+    startedAt,
+    completedAt: Date.now(),
+    findings,
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -145,9 +223,10 @@ export type FullScanOptions = {
   openclawHome?: string;
   /** Recent tool call records for behavior analysis. */
   recentToolCalls?: ToolCallRecord[];
+  semanticAnalyzer: MemorySemanticAnalyzer;
 };
 
-export function runFullScan(options: FullScanOptions): ScanReport {
+export async function runFullScan(options: FullScanOptions): Promise<ScanReport> {
   const startedAt = Date.now();
   const results: ScanResult[] = [];
 
@@ -172,6 +251,12 @@ export function runFullScan(options: FullScanOptions): ScanReport {
   // 3. MEMORY.md check
   const workspaceDir = options.workspaceDir ?? process.cwd();
   results.push(scanMemory({ workspaceDir }));
+  results.push(
+    await scanMemorySemantically({
+      workspaceDir,
+      semanticAnalyzer: options.semanticAnalyzer,
+    }),
+  );
 
   // 4. Full skills deep scan (ALL files, no day filter)
   const skillsDir = path.join(options.projectRoot, "skills");

@@ -15,7 +15,13 @@ import type { GuardAlert, ScanReport } from "../types.js";
 
 type AuditEntry = {
   timestamp: number;
-  type: "alert" | "scan_report" | "tool_block" | "injection_detected" | "startup";
+  type:
+    | "alert"
+    | "scan_report"
+    | "tool_block"
+    | "injection_detected"
+    | "semantic_memory_analysis"
+    | "startup";
   data: GuardAlert | ScanReport | Record<string, unknown>;
 };
 
@@ -156,6 +162,15 @@ export class AuditLog {
         channelId: details.channelId,
         contentPreview: sanitizeString(details.content),
       },
+    });
+  }
+
+  /** Log semantic memory analysis decisions. */
+  logSemanticMemoryAnalysis(details: Record<string, unknown>): void {
+    this.append({
+      timestamp: Date.now(),
+      type: "semantic_memory_analysis",
+      data: sanitizeValue(details) as Record<string, unknown>,
     });
   }
 

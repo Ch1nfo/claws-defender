@@ -46,6 +46,14 @@ export type DefenderLogger = {
   error: (msg: string) => void;
 };
 
+export type OpenClawPluginConfigLike = {
+  agents?: {
+    defaults?: {
+      workspace?: string;
+    };
+  };
+};
+
 export type DefenderToolContext = {
   sessionKey?: string;
   runId?: string;

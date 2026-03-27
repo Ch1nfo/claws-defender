@@ -3,17 +3,43 @@
 // This file exists only to allow standalone TypeScript compilation.
 
 declare module "openclaw/plugin-sdk/plugin-entry" {
+  export type OpenClawConfig = {
+    agents?: {
+      defaults?: {
+        workspace?: string;
+      };
+    };
+  };
+
   export interface OpenClawPluginApi {
     logger: {
       info?: (msg: string) => void;
       warn: (msg: string) => void;
       error: (msg: string) => void;
     };
-    config: unknown;
+    config: OpenClawConfig;
     pluginConfig?: Record<string, unknown>;
     runtime: {
       agent: {
-        resolveAgentWorkspaceDir(config: unknown): string | undefined;
+        resolveAgentTimeoutMs(params: { cfg?: OpenClawConfig }): number;
+        runEmbeddedPiAgent(params: {
+          sessionId: string;
+          sessionFile: string;
+          workspaceDir: string;
+          config?: OpenClawConfig;
+          prompt: string;
+          timeoutMs: number;
+          runId: string;
+          agentDir?: string;
+          disableTools?: boolean;
+        }): Promise<{
+          payloads?: Array<{
+            text?: string;
+            content?: string;
+            message?: unknown;
+            isError?: boolean;
+          }>;
+        }>;
       };
     };
     on(event: "before_tool_call", handler: (event: {

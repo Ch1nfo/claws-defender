@@ -8,6 +8,7 @@
  */
 
 import type { AuditLog } from "../audit/immutable-log.js";
+import type { MemorySemanticAnalyzer } from "../llm/memory-semantic-analyzer.js";
 import { evaluateCommandRules } from "../security/command-rules.js";
 import { analyzeMemoryWrite } from "../scanners/memory-scanner.js";
 import type {
@@ -67,6 +68,11 @@ function isExfiltrationPattern(recentCalls: ToolCallRecord[]): boolean {
 export type BeforeToolCallHandlerDeps = {
   auditLog: AuditLog;
   recentToolCalls: ToolCallRecord[];
+  semanticAnalyzer: MemorySemanticAnalyzer;
+  logger: {
+    warn: (msg: string) => void;
+  };
+  resolveWorkspaceDir: () => string;
 };
 
 export function createBeforeToolCallHandler(deps: BeforeToolCallHandlerDeps) {
@@ -142,13 +148,59 @@ export function createBeforeToolCallHandler(deps: BeforeToolCallHandlerDeps) {
               auditLog.logToolBlock({ toolName, reason, params, sessionKey: ctx.sessionKey });
               return { block: true, blockReason: reason };
             }
+          }
 
-            // Block if critical prompt injection patterns are found
-            if (criticalCount > 0) {
-              const reason = `Memory write blocked: ${criticalCount} critical prompt injection patterns detected`;
-              auditLog.logToolBlock({ toolName, reason, params, sessionKey: ctx.sessionKey });
-              return { block: true, blockReason: reason };
-            }
+          const semantic = await deps.semanticAnalyzer.analyze({
+            content,
+            source: "memory_write",
+            filePath,
+            workspaceDir: deps.resolveWorkspaceDir(),
+            ruleFindings: injectionFindings,
+          });
+
+          auditLog.logSemanticMemoryAnalysis({
+            source: "memory_write",
+            filePath,
+            sessionKey: ctx.sessionKey,
+            risk: semantic?.risk,
+            confidence: semantic?.confidence,
+            recommendedAction: semantic?.recommendedAction,
+            categories: semantic?.categories,
+            blocked:
+              semantic?.risk === "malicious" &&
+              semantic.recommendedAction === "block" &&
+              semantic.confidence >= 0.85,
+          });
+
+          if (
+            semantic?.risk === "malicious" &&
+            semantic.recommendedAction === "block" &&
+            semantic.confidence >= 0.85
+          ) {
+            const reason = `Memory write blocked: semantic analysis classified content as malicious (${semantic.rationale})`;
+            auditLog.logToolBlock({ toolName, reason, params, sessionKey: ctx.sessionKey });
+            return { block: true, blockReason: reason };
+          }
+
+          if (semantic?.risk === "suspicious" || semantic?.risk === "malicious") {
+            auditLog.logAlert({
+              timestamp: Date.now(),
+              level: semantic.risk === "malicious" ? "critical" : "warn",
+              source: "before-tool-call",
+              toolName,
+              sessionKey: ctx.sessionKey,
+              message: `Memory write semantic analysis flagged content as ${semantic.risk} (${Math.round(
+                semantic.confidence * 100,
+              )}% confidence)`,
+              details: {
+                filePath,
+                categories: semantic.categories,
+                rationale: semantic.rationale,
+                evidenceSpans: semantic.evidenceSpans,
+              },
+            });
+          } else if (!semantic) {
+            deps.logger.warn("[claws-defender] Memory semantic analysis unavailable; allowing write.");
           }
         }
       }

@@ -64,12 +64,31 @@ function collectExtensionEntryFiles(extensionsDir: string): string[] {
 
 async function scanMemorySemantically(params: {
   workspaceDir: string;
-  semanticAnalyzer: MemorySemanticAnalyzer;
+  semanticAnalyzer?: MemorySemanticAnalyzer;
   maxFiles?: number;
   maxCharsPerFile?: number;
 }): Promise<ScanResult> {
   const startedAt = Date.now();
   const findings: ScanResult["findings"] = [];
+  if (!params.semanticAnalyzer) {
+    return {
+      scanner: "memory-semantic-scanner",
+      startedAt,
+      completedAt: Date.now(),
+      findings: [
+        {
+          id: "memory-semantic-analyzer-unavailable",
+          scanner: "memory-semantic-scanner",
+          severity: "info",
+          title: "Semantic memory scan skipped",
+          description:
+            "Semantic memory analysis was unavailable for this full scan, so only rule-based memory scanning was performed.",
+          recommendation:
+            "Rebuild and reload the plugin if semantic memory analysis is expected for full scans.",
+        },
+      ],
+    };
+  }
   const candidates: string[] = [];
   const maxFiles = params.maxFiles ?? 20;
   const maxCharsPerFile = params.maxCharsPerFile ?? 8_000;
@@ -223,7 +242,7 @@ export type FullScanOptions = {
   openclawHome?: string;
   /** Recent tool call records for behavior analysis. */
   recentToolCalls?: ToolCallRecord[];
-  semanticAnalyzer: MemorySemanticAnalyzer;
+  semanticAnalyzer?: MemorySemanticAnalyzer;
 };
 
 export async function runFullScan(options: FullScanOptions): Promise<ScanReport> {

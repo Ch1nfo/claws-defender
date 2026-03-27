@@ -27,8 +27,8 @@ Claws-Defender focuses on those runtime risks:
 ## Highlights
 
 - **Before-tool-call guardrail**: blocks reverse shells, dangerous exfiltration patterns, sensitive file reads, and other suspicious command executions
-- **Memory write protection**: scans content before it lands in `MEMORY.md` or `memory/*.md`
-- **Cross-line shell payload detection**: catches split payloads such as `curl ... \n| sh` and multi-line reverse shell fragments
+- **Memory write protection**: scans content before it lands in `MEMORY.md` or `memory/*.md` using both static regex and LLM semantic analysis
+- **LLM Semantic Intent Analysis**: deeply inspects writes for malicious context, neutralizing complex or obfuscated Prompt Injection attacks that evade standard rules
 - **Workspace scanning**: supports quick scan and full scan flows for config, memory, credentials, sessions, and skill code
 - **Local audit trail**: writes alerts and block decisions to a local JSONL audit log with secret redaction
 
@@ -80,8 +80,9 @@ it is scanned for:
 - role reassignment instructions
 - hidden or persistent behavior directives
 - dangerous shell payloads, including cross-line command fragments
+- **(New!) LLM Semantic Analysis**: utilizes `MemorySemanticAnalyzer` to understand complex context and intent, catching sophisticated injection variants that bypass static matching.
 
-Dangerous shell payloads in memory writes are blocked before they persist.
+Dangerous shell payloads or high-confidence malicious intents identified by the LLM are blocked before they persist.
 
 ### 3. Security Scanning
 

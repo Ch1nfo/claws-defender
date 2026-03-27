@@ -94,22 +94,34 @@ function collectText(value: unknown): string {
 }
 
 function stripCodeFences(s: string): string {
-  const trimmed = s.trim();
+  let trimmed = s.trim();
   const match = trimmed.match(/^```(?:json)?\s*([\s\S]*?)\s*```$/i);
   if (match) {
     return (match[1] ?? "").trim();
+  }
+  const start = trimmed.indexOf("{");
+  const end = trimmed.lastIndexOf("}");
+  if (start >= 0 && end > start) {
+    return trimmed.slice(start, end + 1).trim();
   }
   return trimmed;
 }
 
 function clampConfidence(value: unknown): number | null {
-  if (typeof value !== "number" || !Number.isFinite(value)) {
+  let num = value;
+  if (typeof num === "string") {
+    num = parseFloat(num);
+  }
+  if (typeof num !== "number" || !Number.isFinite(num)) {
     return null;
   }
-  if (value < 0 || value > 1) {
+  if (num > 1 && num <= 100) {
+    return num / 100;
+  }
+  if (num < 0 || num > 1) {
     return null;
   }
-  return value;
+  return num;
 }
 
 function isRecommendedAction(value: unknown): value is MemorySemanticAssessment["recommendedAction"] {
@@ -131,11 +143,13 @@ function parseAssessment(rawText: string): MemorySemanticAssessment | null {
     return null;
   }
   const record = parsed as Record<string, unknown>;
-  if (!isRisk(record.risk)) {
+  const riskRaw = typeof record.risk === "string" ? record.risk.toLowerCase() : record.risk;
+  if (!isRisk(riskRaw)) {
     return null;
   }
   const confidence = clampConfidence(record.confidence);
-  if (confidence === null || !isRecommendedAction(record.recommendedAction)) {
+  const actionRaw = typeof record.recommendedAction === "string" ? record.recommendedAction.toLowerCase() : record.recommendedAction;
+  if (confidence === null || !isRecommendedAction(actionRaw)) {
     return null;
   }
   const categories = Array.isArray(record.categories)
@@ -152,9 +166,9 @@ function parseAssessment(rawText: string): MemorySemanticAssessment | null {
     ? record.evidenceSpans.filter((value): value is string => typeof value === "string").slice(0, 5)
     : [];
   return {
-    risk: record.risk,
+    risk: riskRaw,
     confidence,
-    recommendedAction: record.recommendedAction,
+    recommendedAction: actionRaw,
     categories,
     rationale,
     evidenceSpans,

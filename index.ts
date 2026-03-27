@@ -61,12 +61,14 @@ const clawsDefenderPlugin = definePluginEntry({
     const openclawHome = path.join(process.env.HOME ?? "~", ".openclaw");
     const baselineDir = path.join(openclawHome, "claws-defender");
     const auditLog = new AuditLog(baselineDir);
-    const semanticAnalyzer = createMemorySemanticAnalyzer({
-      runEmbeddedPiAgent: api.runtime.agent.runEmbeddedPiAgent,
-      resolveAgentTimeoutMs: api.runtime.agent.resolveAgentTimeoutMs,
-      config: api.config,
-      logger: api.logger,
-    });
+    const createSemanticAnalyzer = () =>
+      createMemorySemanticAnalyzer({
+        runEmbeddedPiAgent: api.runtime.agent.runEmbeddedPiAgent,
+        resolveAgentTimeoutMs: api.runtime.agent.resolveAgentTimeoutMs,
+        config: api.config,
+        logger: api.logger,
+      });
+    const semanticAnalyzer = createSemanticAnalyzer();
 
     // -------------------------------------------------------------------
     // Register hooks
@@ -169,6 +171,7 @@ const clawsDefenderPlugin = definePluginEntry({
       async execute() {
         try {
           const { projectRoot, workspaceDir } = resolveScanRoots(api);
+          const fullScanSemanticAnalyzer = createSemanticAnalyzer();
           const report = await runFullScan({
             projectRoot,
             workspaceDir,
@@ -176,7 +179,7 @@ const clawsDefenderPlugin = definePluginEntry({
             baselineDir,
             openclawHome,
             recentToolCalls,
-            semanticAnalyzer,
+            semanticAnalyzer: fullScanSemanticAnalyzer,
           });
 
           lastScanReport = report;
